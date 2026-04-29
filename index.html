@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLUS SALUD – Calendario completo de citas</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <style>
+    .tab-btn.active { background-color: #2563eb; color: white; }
+    .toast { transition: opacity 0.3s; z-index: 1000; }
+    .urgente { background-color: #fee2e2; border-left: 4px solid #dc2626; }
+    .medio { background-color: #fff3e3; border-left: 4px solid #f59e0b; }
+    .no-urgente { background-color: #e0f2fe; border-left: 4px solid #0ea5e9; }
+    .sidebar-item.active { background-color: #1e3a8a; color: white; }
+    .panic-button {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      z-index: 1000;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+      70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+
+  <!-- Pantalla de login / registro -->
+  <div id="loginOverlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <div class="text-center mb-4">
+        <i class="fas fa-heartbeat text-5xl text-blue-600"></i>
+        <h1 class="text-2xl font-bold mt-2">PLUS SALUD</h1>
+        <p class="text-gray-500">Acceso a Pacientes y Profesionales</p>
+      </div>
+      
+      <!-- Pestañas de login/registro -->
+      <div class="flex border-b mb-4">
+        <button id="btnLoginTab" class="flex-1 py-2 font-semibold text-blue-600 border-b-2 border-blue-600">Iniciar sesión</button>
+        <button id="btnRegisterTab" class="flex-1 py-2 font-semibold text-gray-500">Registrarse</button>
+      </div>
+
+      <!-- Formulario de inicio de sesión -->
+      <div id="loginForm">
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium">Usuario / Email</label>
+            <input type="text" id="loginUser" class="w-full border rounded-lg p-2 mt-1" placeholder="Ej: paciente@correo.com o AF2026">
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Contraseña</label>
+            <input type="password" id="loginPass" class="w-full border rounded-lg p-2 mt-1" placeholder="********">
+          </div>
+          <button onclick="doUnifiedLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg">Ingresar</button>
+        </div>
+        <div class="text-center text-xs text-gray-400 mt-4">
+          <p>Demo Paciente: usuario: paciente@test.com / contraseña: 123 (ya registrado)</p>
+          <p>Demo Doctor: usuario: AF2026 / contraseña: AF2026</p>
+        </div>
+      </div>
+
+      <!-- Formulario de registro (con pago simulado) -->
+      <div id="registerForm" class="hidden">
+        <div class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium">Nombre completo</label>
+            <input type="text" id="regName" class="w-full border rounded-lg p-2" placeholder="Ej: Ana Rodríguez">
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Correo electrónico</label>
+            <input type="email" id="regEmail" class="w-full border rounded-lg p-2" placeholder="correo@ejemplo.com">
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Contraseña</label>
+            <input type="password" id="regPass" class="w-full border rounded-lg p-2" placeholder="Mínimo 4 caracteres">
+          </div>
+          <div>
+            <label class="block text-sm font-medium">Confirmar contraseña</label>
+            <input type="password" id="regPassConfirm" class="w-full border rounded-lg p-2" placeholder="Repite la contraseña">
+          </div>
+          <div class="border-t pt-3 mt-2">
+            <p class="font-semibold text-sm mb-2">Pago de membresía (único): <span class="text-green-600 font-bold">500 Lempiras</span></p>
+            <div>
+              <label class="block text-sm font-medium">Número de tarjeta (demo)</label>
+              <input type="text" id="cardNumber" class="w-full border rounded-lg p-2" placeholder="4111 1111 1111 1111">
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+              <input type="text" id="cardExpiry" placeholder="MM/AA" class="border rounded-lg p-2">
+              <input type="text" id="cardCvv" placeholder="CVV" class="border rounded-lg p-2">
+            </div>
+          </div>
+          <button onclick="registerAndPay()" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg mt-2">Registrarse y pagar (L 500)</button>
+        </div>
+        <p class="text-xs text-gray-400 text-center mt-3">Los datos de tarjeta son simulados. No se almacena información real.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor de la aplicación (se llena según rol) -->
+  <div id="appContainer" class="hidden"></div>
+
+  <script>
+    // ==================== CONFIGURACIÓN GLOBAL ====================
+    function formatCurrency(amount) {
+      return amount.toLocaleString('es-HN') + ' L';
+    }
+
+    // Precios de consultas: Especialista 1100, General 500
+    function getConsultationPrice(specialty) {
+      return specialty && specialty.toLowerCase().includes("general") ? 500 : 1100;
+    }
+
+    // ==================== DATOS PERSISTIDOS (en memoria) ====================
+    // Usuarios pacientes registrados
+    let users = [
+      { id: 1, name: "Ana Rodríguez", email: "paciente@test.com", password: "123", role: "patient", wallet: 70750, protectionPlan: null, hasFirstAidKit: true, medicalRecord: { consultations: [], diagnoses: [], medications: [], labs: [] } }
+    ];
+    // Doctores
+    let doctors = [
+      { id: 1, name: "Dr. Mario Moya", username: "MM2026", password: "MM2026", specialization: "Ortopedia", rating: 4.8, balance: 0 },
+      { id: 2, name: "Dr. Pablo Borjas", username: "PB2026", password: "PB2026", specialization: "Cirugía", rating: 4.9, balance: 0 },
+      { id: 3, name: "Dra. Odalis Cerrato", username: "OC2026", password: "OC2026", specialization: "Medicina Interna", rating: 4.7, balance: 0 },
+      { id: 4, name: "Dra. Daisy Carbajal", username: "DC2026", password: "DC2026", specialization: "Ginecología", rating: 4.9, balance: 0 },
+      { id: 5, name: "Dr. Pablo Espinoza", username: "PE2026", password: "PE2026", specialization: "Oncología", rating: 4.8, balance: 0 },
+      { id: 6, name: "Licda. Yadira Cabrera", username: "YC2026", password: "YC2026", specialization: "Nutrición", rating: 4.9, balance: 0 },
+      { id: 7, name: "Licda. Rosa Sierra", username: "RS2026", password: "RS2026", specialization: "Nutrición", rating: 4.8, balance: 0 },
+      { id: 8, name: "Licda. María Valeriano", username: "MV2026", password: "MV2026", specialization: "Nutrición", rating: 4.9, balance: 0 },
+      { id: 9, name: "Dr. Mario Cortes", username: "MC2026", password: "MC2026", specialization: "Psicología", rating: 4.7, balance: 0 },
+      { id: 10, name: "Licda. Stephany Melgar", username: "SM2026", password: "SM2026", specialization: "Psicología", rating: 4.8, balance: 0 },
+      { id: 11, name: "Licda. Claudia Amador", username: "CA2026", password: "CA2026", specialization: "Psicología", rating: 4.9, balance: 0 },
+      { id: 12, name: "Dra. Johana Gómez", username: "JG2026", password: "JG2026", specialization: "Optometría", rating: 4.8, balance: 0 },
+      { id: 13, name: "Dra. Alejandra Flores", username: "AF2026", password: "AF2026", specialization: "Medicina General", rating: 4.9, balance: 0 }
+    ];
+
+    // Solicitudes de pacientes
+    let requests = [
+      { id: 1001, patientId: 1, patientName: "Ana Rodríguez", specialty: "Medicina General", description: "Fiebre y tos", budget: 500, urgency: "urgente", status: "open", createdAt: new Date().toISOString() }
+    ];
+
+    // Citas programadas (compartidas)
+    let appointments = [];
+
+    // Transacciones de doctores
+    let doctorTransactions = [];
+
+    // Planes de protección
+    const protectionPlans = [
+      { id: 10, name: "Salud Esencial", monthlyCost: 12250, coverage: "Atención primaria, urgencias hasta L125,000" },
+      { id: 11, name: "Protección Total", monthlyCost: 22250, coverage: "Cobertura total: cirugías, especialistas, nutrición" }
+    ];
+
+    const clinics = ["Clínica 1", "Clínica 2", "Clínica 3"];
+
+    let currentUser = null;
+    let nextPatientId = users.length + 1;
+
+    // ==================== FUNCIONES COMUNES ====================
+    function showToast(msg, type = "success") {
+      const toast = document.createElement("div");
+      toast.className = `toast fixed bottom-5 right-5 bg-white rounded-lg shadow-2xl p-4 border-l-8 z-50 flex items-center gap-3 ${type === "success" ? "border-green-500" : "border-red-500"}`;
+      toast.innerHTML = `<i class="fas ${type === "success" ? "fa-check-circle text-green-500" : "fa-exclamation-triangle text-red-500"} text-xl"></i><span>${msg}</span><button class="ml-4 text-gray-400" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>`;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 4000);
+    }
+
+    // ==================== REGISTRO Y PAGO ====================
+    function registerAndPay() {
+      const name = document.getElementById("regName").value.trim();
+      const email = document.getElementById("regEmail").value.trim();
+      const password = document.getElementById("regPass").value;
+      const confirm = document.getElementById("regPassConfirm").value;
+      const cardNumber = document.getElementById("cardNumber").value.trim();
+      const expiry = document.getElementById("cardExpiry").value.trim();
+      const cvv = document.getElementById("cardCvv").value.trim();
+
+      if (!name || !email || !password) { showToast("Complete todos los campos", "error"); return; }
+      if (password !== confirm) { showToast("Las contraseñas no coinciden", "error"); return; }
+      if (password.length < 4) { showToast("La contraseña debe tener al menos 4 caracteres", "error"); return; }
+      if (!cardNumber || !expiry || !cvv) { showToast("Complete los datos de tarjeta", "error"); return; }
+      if (users.find(u => u.email === email)) { showToast("Este correo ya está registrado", "error"); return; }
+
+      // Pago de membresía simulado (500 L)
+      const newId = nextPatientId++;
+      const newUser = {
+        id: newId,
+        name: name,
+        email: email,
+        password: password,
+        role: "patient",
+        wallet: 0,
+        protectionPlan: null,
+        hasFirstAidKit: true,
+        medicalRecord: { consultations: [], diagnoses: [], medications: [], labs: [] }
+      };
+      users.push(newUser);
+      showToast("✅ Registro exitoso. Membresía pagada.", "success");
+      currentUser = { ...newUser, role: "patient" };
+      startApp();
+    }
+
+    // ==================== LOGIN UNIFICADO ====================
+    function doUnifiedLogin() {
+      const userLogin = document.getElementById("loginUser").value.trim();
+      const pass = document.getElementById("loginPass").value;
+      let user = users.find(u => u.email === userLogin && u.password === pass);
+      if (user) {
+        currentUser = { ...user, role: "patient" };
+        startApp();
+        return;
+      }
+      let doctor = doctors.find(d => d.username === userLogin && d.password === pass);
+      if (doctor) {
+        currentUser = { ...doctor, role: "doctor" };
+        startApp();
+        return;
+      }
+      showToast("Usuario o contraseña incorrectos", "error");
+    }
+
+    function startApp() {
+      document.getElementById("loginOverlay").style.display = "none";
+      const container = document.getElementById("appContainer");
+      container.classList.remove("hidden");
+      if (currentUser.role === "patient") {
+        renderPatientApp();
+      } else {
+        renderDoctorApp();
+      }
+    }
+
+    function logout() {
+      currentUser = null;
+      document.getElementById("loginOverlay").style.display = "flex";
+      document.getElementById("appContainer").classList.add("hidden");
+      document.getElementById("appContainer").innerHTML = "";
+      // Resetear formularios a login
+      document.getElementById("loginForm").classList.remove("hidden");
+      document.getElementById("registerForm").classList.add("hidden");
+      document.getElementById("btnLoginTab").classList.add("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnLoginTab").classList.remove("text-gray-500");
+      document.getElementById("btnRegisterTab").classList.remove("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnRegisterTab").classList.add("text-gray-500");
+    }
+
+    // ==================== VISTA PARA PACIENTE (con calendario de citas) ====================
+    function renderPatientApp() {
+      let patientData = users.find(u => u.id === currentUser.id) || currentUser;
+      const wallet = patientData.wallet;
+      
+      const html = `
+        <div class="bg-gradient-to-r from-blue-800 to-indigo-800 text-white shadow-lg px-4 py-3 flex justify-between items-center">
+          <div><i class="fas fa-heartbeat text-2xl"></i> <span class="text-2xl font-bold">PLUS SALUD</span> <span class="text-sm bg-white/20 px-2 py-1 rounded">Paciente</span></div>
+          <div><span class="mr-3">${patientData.name} | ${formatCurrency(wallet)}</span> <button onclick="logout()" class="bg-white/20 px-3 py-1 rounded">Salir</button></div>
+        </div>
+        <div class="container mx-auto px-4 mt-6">
+          <div class="flex flex-wrap gap-2 border-b">
+            <button id="tabConsultaP" class="tab-btn py-2 px-4 font-semibold bg-blue-600 text-white rounded-t">Consulta</button>
+            <button id="tabCitasP" class="tab-btn py-2 px-4 font-semibold bg-gray-100 text-gray-700 rounded-t">Mis citas</button>
+            <button id="tabExpedienteP" class="tab-btn py-2 px-4 font-semibold bg-gray-100 text-gray-700 rounded-t">Expediente</button>
+            <button id="tabProteccionP" class="tab-btn py-2 px-4 font-semibold bg-gray-100 text-gray-700 rounded-t">Protección</button>
+            <button id="tabCuentaP" class="tab-btn py-2 px-4 font-semibold bg-gray-100 text-gray-700 rounded-t">Cuenta</button>
+          </div>
+          <div id="patientContent" class="mt-6"></div>
+        </div>
+        <button id="panicButton" class="panic-button bg-red-600 hover:bg-red-700 text-white rounded-full p-4 shadow-2xl"><i class="fas fa-exclamation-triangle text-2xl mr-2"></i>EMERGENCIA</button>
+      `;
+      document.getElementById("appContainer").innerHTML = html;
+      
+      let activeTab = "consulta";
+      
+      function loadPatientTab() {
+        const container = document.getElementById("patientContent");
+        if (activeTab === "consulta") {
+          const specialtyOptions = doctors.map(d => `<option value="${d.specialization}">${d.specialization}</option>`).join('');
+          const doctorOptions = doctors.map(d => `<option value="${d.id}">${d.name} (${d.specialization})</option>`).join('');
+          // Precios dinámicos en descripción
+          container.innerHTML = `
+            <div class="bg-white rounded-2xl p-5 shadow">
+              <h2 class="text-xl font-bold">Solicitar cita rápida</h2>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                ${["Medicina General","Nutrición","Psicología","Ginecología"].map(spec => {
+                  const price = getConsultationPrice(spec);
+                  return `<div class="bg-gray-100 p-2 rounded text-center cursor-pointer" onclick="quickAppointment('${spec}')">
+                    <i class="fas fa-stethoscope text-2xl"></i>
+                    <p>${spec}</p>
+                    <p class="text-xs text-green-600">${formatCurrency(price)}</p>
+                  </div>`;
+                }).join('')}
+              </div>
+              <hr class="my-4">
+              <h2 class="text-xl font-bold">Nueva solicitud completa</h2>
+              <div class="grid md:grid-cols-2 gap-4 mt-3">
+                <div><label>Especialidad</label><select id="specSelect" class="w-full border p-2 rounded">${specialtyOptions}</select></div>
+                <div><label>Doctor preferido</label><select id="doctorSelect" class="w-full border p-2 rounded"><option value="">Cualquiera</option>${doctorOptions}</select></div>
+                <div><label>Descripción</label><input id="descInput" class="w-full border p-2 rounded"></div>
+                <div><label>Presupuesto (L)</label><input type="number" id="budgetInput" class="w-full border p-2 rounded" value="500"></div>
+                <div><label>Urgencia</label><select id="urgencySelect" class="w-full border p-2 rounded"><option value="urgente">Urgente</option><option value="medio">Medio</option><option value="no-urgente">No urgente</option></select></div>
+              </div>
+              <button onclick="createPatientRequest()" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded">Publicar solicitud</button>
+              <div class="mt-6"><h3 class="font-bold">Mis solicitudes activas</h3>${requests.filter(r => r.patientId === patientData.id && r.status === "open").map(r => `<div class="border p-2 mt-2">${r.specialty} - ${r.description} - ${formatCurrency(r.budget)}</div>`).join('') || "<p class='text-gray-400'>No hay solicitudes activas</p>"}</div>
+            </div>
+          `;
+          // Actualizar presupuesto dinámico al cambiar especialidad
+          document.getElementById("specSelect").addEventListener("change", function() {
+            const price = getConsultationPrice(this.value);
+            document.getElementById("budgetInput").value = price;
+          });
+          document.getElementById("budgetInput").value = getConsultationPrice(document.getElementById("specSelect").value);
+        } 
+        else if (activeTab === "citasP") {
+          // Mostrar todas las citas del paciente (programadas y completadas)
+          const myAppointments = appointments.filter(apt => apt.patientName === patientData.name);
+          const sorted = [...myAppointments].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+          container.innerHTML = `
+            <div class="bg-white rounded-2xl p-5 shadow">
+              <h2 class="text-xl font-bold">📅 Calendario de mis citas</h2>
+              ${sorted.length === 0 ? '<p class="text-gray-400 mt-3">No tienes citas programadas.</p>' : sorted.map(apt => `
+                <div class="border p-3 mt-3 rounded flex justify-between items-center">
+                  <div>
+                    <strong>${apt.specialty}</strong> con ${apt.doctorName}<br>
+                    ${apt.clinic} - ${apt.date} a las ${apt.time}<br>
+                    Estado: ${apt.status === "programada" ? "Pendiente" : "Completada"} | Costo: ${formatCurrency(getConsultationPrice(apt.specialty))}
+                  </div>
+                  ${apt.status === "programada" ? '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full text-xs">Agendada</span>' : '<span class="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs">Completada</span>'}
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+        else if (activeTab === "expediente") {
+          container.innerHTML = `<div class="bg-white p-5 rounded-2xl"><h2 class="text-xl font-bold">Expediente Médico</h2><p>Historial clínico del paciente (próximamente).</p></div>`;
+        } 
+        else if (activeTab === "proteccion") {
+          container.innerHTML = `<div class="bg-white p-5 rounded-2xl"><h2 class="text-xl font-bold">Protección en Salud</h2>${protectionPlans.map(p => `<div class="border p-3 mt-2"><h3 class="font-bold">${p.name}</h3><p>${p.coverage}</p><p>${formatCurrency(p.monthlyCost)}/mes</p><button onclick="buyProtection(${p.id})" class="bg-red-600 text-white px-3 py-1 rounded">Contratar</button></div>`).join('')}</div>`;
+        } 
+        else {
+          container.innerHTML = `<div class="bg-white p-5 rounded-2xl"><h2 class="text-xl font-bold">Mi Cuenta</h2><p>Saldo: ${formatCurrency(patientData.wallet)}</p><input type="number" id="depositAmount" placeholder="Monto a depositar" class="border p-2 rounded mt-2"><button onclick="depositMoney()" class="bg-blue-600 text-white px-3 py-1 rounded mt-2">Depositar</button><h3 class="font-bold mt-4">Movimientos</h3><div id="transactionsList"></div></div>`;
+        }
+      }
+
+      window.createPatientRequest = function() {
+        const specialty = document.getElementById("specSelect").value;
+        const description = document.getElementById("descInput").value;
+        let budget = parseFloat(document.getElementById("budgetInput").value);
+        const urgency = document.getElementById("urgencySelect").value;
+        if (!specialty) { showToast("Seleccione una especialidad", "error"); return; }
+        const expectedPrice = getConsultationPrice(specialty);
+        if (!budget || budget < expectedPrice) {
+          showToast(`El presupuesto mínimo para ${specialty} es ${formatCurrency(expectedPrice)}. Se ajustará automáticamente.`, "info");
+          budget = expectedPrice;
+        }
+        const newId = Date.now();
+        requests.push({ id: newId, patientId: patientData.id, patientName: patientData.name, specialty, description, budget, urgency, status: "open", createdAt: new Date().toISOString() });
+        showToast("Solicitud publicada", "success");
+        loadPatientTab();
+      };
+      window.quickAppointment = function(spec) {
+        const price = getConsultationPrice(spec);
+        const newId = Date.now();
+        requests.push({ id: newId, patientId: patientData.id, patientName: patientData.name, specialty: spec, description: `Consulta rápida de ${spec}`, budget: price, urgency: "medio", status: "open", createdAt: new Date().toISOString() });
+        showToast(`Cita rápida de ${spec} solicitada (${formatCurrency(price)})`, "success");
+        loadPatientTab();
+      };
+      window.buyProtection = function(planId) {
+        const plan = protectionPlans.find(p => p.id === planId);
+        if (patientData.wallet < plan.monthlyCost) { showToast("Saldo insuficiente", "error"); return; }
+        patientData.wallet -= plan.monthlyCost;
+        patientData.protectionPlan = plan;
+        showToast(`Plan ${plan.name} activado`, "success");
+        loadPatientTab();
+      };
+      window.depositMoney = function() {
+        const amount = parseFloat(document.getElementById("depositAmount")?.value);
+        if (amount > 0) {
+          patientData.wallet += amount;
+          showToast(`Depósito de ${formatCurrency(amount)}`, "success");
+          loadPatientTab();
+        }
+      };
+      document.getElementById("tabConsultaP").onclick = () => { activeTab = "consulta"; loadPatientTab(); };
+      document.getElementById("tabCitasP").onclick = () => { activeTab = "citasP"; loadPatientTab(); };
+      document.getElementById("tabExpedienteP").onclick = () => { activeTab = "expediente"; loadPatientTab(); };
+      document.getElementById("tabProteccionP").onclick = () => { activeTab = "proteccion"; loadPatientTab(); };
+      document.getElementById("tabCuentaP").onclick = () => { activeTab = "cuenta"; loadPatientTab(); };
+      document.getElementById("panicButton").onclick = () => {
+        const newId = Date.now();
+        requests.push({ id: newId, patientId: patientData.id, patientName: patientData.name, specialty: "Emergencia", description: "EMERGENCIA MÉDICA URGENTE", budget: 1100, urgency: "urgente", status: "open", createdAt: new Date().toISOString() });
+        showToast("🚨 Alerta de emergencia enviada", "success");
+        loadPatientTab();
+      };
+      loadPatientTab();
+    }
+
+    // ==================== VISTA PARA DOCTOR ====================
+    function renderDoctorApp() {
+      const html = `
+        <div class="bg-gradient-to-r from-blue-800 to-indigo-800 text-white shadow-md px-4 py-3 flex justify-between items-center">
+          <div><i class="fas fa-heartbeat text-2xl"></i> <span class="text-2xl font-bold">PLUS SALUD</span> <span class="text-sm bg-white/20 px-2 py-1 rounded">Doctor</span></div>
+          <div><span id="docNameSpan" class="mr-3"></span> <button onclick="logout()" class="bg-white/20 px-3 py-1 rounded">Salir</button></div>
+        </div>
+        <div class="container mx-auto px-4 py-6 flex flex-col lg:flex-row gap-6">
+          <aside class="lg:w-80 bg-white rounded-2xl p-4 shadow">
+            <div class="border-b pb-2 mb-3"><p id="sidebarNameDoc" class="font-bold"></p><p><i class="fas fa-star text-yellow-400"></i> <span id="sidebarRatingDoc"></span></p></div>
+            <nav class="space-y-1">
+              <button onclick="setDocSection('dashboard')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-tachometer-alt"></i> Panel</button>
+              <button onclick="setDocSection('requests')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-notes-medical"></i> Solicitudes</button>
+              <button onclick="setDocSection('myAppointments')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-calendar-alt"></i> Mis citas</button>
+              <button onclick="setDocSection('calendar')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-calendar-week"></i> Calendario general</button>
+              <button onclick="setDocSection('earnings')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-chart-line"></i> Ingresos</button>
+              <button onclick="setDocSection('profile')" class="sidebar-item w-full text-left px-4 py-2 rounded-xl hover:bg-blue-50"><i class="fas fa-edit"></i> Perfil</button>
+            </nav>
+          </aside>
+          <main class="flex-1"><div id="doctorContent"></div></main>
+        </div>
+      `;
+      document.getElementById("appContainer").innerHTML = html;
+      document.getElementById("docNameSpan").innerText = currentUser.name;
+      document.getElementById("sidebarNameDoc").innerText = currentUser.name;
+      document.getElementById("sidebarRatingDoc").innerText = currentUser.rating;
+      
+      let activeDocSection = "dashboard";
+      
+      function hasConflict(doctorId, clinic, date, time) {
+        return appointments.some(apt => apt.doctorId === doctorId && apt.clinic === clinic && apt.date === date && apt.time === time);
+      }
+      
+      window.scheduleAppointment = function(requestId, clinic, date, time) {
+        if (!clinic || !date || !time) { showToast("Complete clínica, fecha y hora", "error"); return; }
+        const hour = parseInt(time.split(':')[0]);
+        if (hour < 7 || hour >= 19) { showToast("Horario permitido 7:00-19:00", "error"); return; }
+        const request = requests.find(r => r.id === requestId);
+        if (!request || request.status !== "open") { showToast("Solicitud no disponible", "error"); return; }
+        if (hasConflict(currentUser.id, clinic, date, time)) {
+          showToast("Conflicto: ya tienes una cita en esa clínica, fecha y hora", "error");
+          return;
+        }
+        appointments.push({
+          id: Date.now(), doctorId: currentUser.id, doctorName: currentUser.name,
+          patientName: request.patientName, clinic, date, time,
+          specialty: request.specialty, status: "programada"
+        });
+        request.status = "scheduled";
+        const price = getConsultationPrice(request.specialty);
+        showToast(`Cita programada con ${request.patientName} en ${clinic} el ${date} a las ${time} (costo para paciente: ${formatCurrency(price)})`, "success");
+        renderDoctorContent();
+      };
+      
+      window.completeAppointment = function(appId) {
+        const apt = appointments.find(a => a.id === appId);
+        if (!apt || apt.status !== "programada") return;
+        apt.status = "completada";
+        const price = getConsultationPrice(apt.specialty);
+        doctorTransactions.push({ providerId: apt.doctorId, amount: price, concept: `Cita completada - ${apt.patientName} (${apt.specialty})`, date: new Date().toISOString() });
+        const doc = doctors.find(d => d.id === apt.doctorId);
+        if (doc) doc.balance += price;
+        showToast(`Cita completada. +${formatCurrency(price)} acreditados.`, "success");
+        renderDoctorContent();
+      };
+      
+      function renderDoctorContent() {
+        const container = document.getElementById("doctorContent");
+        if (activeDocSection === "dashboard") {
+          const myApps = appointments.filter(a => a.doctorId === currentUser.id && a.status === "programada").length;
+          const totalEarned = doctorTransactions.filter(t => t.providerId === currentUser.id).reduce((a,b)=>a+b.amount,0);
+          container.innerHTML = `<div class="grid grid-cols-3 gap-4"><div class="bg-white p-5 rounded-2xl shadow">Citas: ${myApps}</div><div class="bg-white p-5 rounded-2xl shadow">Ingresos: ${formatCurrency(totalEarned)}</div><div class="bg-white p-5 rounded-2xl shadow">Rating: ${currentUser.rating}</div></div>`;
+        } else if (activeDocSection === "requests") {
+          const openReqs = requests.filter(r => r.status === "open");
+          container.innerHTML = `<div class="bg-white rounded-2xl p-6"><h2 class="text-2xl font-bold">Solicitudes abiertas</h2>${openReqs.map(req => `
+            <div class="border p-3 mt-2 rounded">
+              <div><strong>${req.specialty}</strong> - ${req.patientName}</div>
+              <p>${req.description}</p>
+              <p>💰 Presupuesto: ${formatCurrency(req.budget)} (costo sugerido: ${formatCurrency(getConsultationPrice(req.specialty))})</p>
+              <div class="grid grid-cols-4 gap-2 mt-2">
+                <select id="clinic_${req.id}" class="border p-1 rounded"><option value="">Clínica</option>${clinics.map(c => `<option>${c}</option>`).join('')}</select>
+                <input type="date" id="date_${req.id}" class="border p-1 rounded">
+                <input type="time" id="time_${req.id}" class="border p-1 rounded" min="07:00" max="19:00">
+                <button onclick="scheduleAppointment(${req.id}, document.getElementById('clinic_${req.id}').value, document.getElementById('date_${req.id}').value, document.getElementById('time_${req.id}').value)" class="bg-green-600 text-white px-2 py-1 rounded">Programar</button>
+              </div>
+            </div>`).join('')}</div>`;
+        } else if (activeDocSection === "myAppointments") {
+          const myApps = appointments.filter(a => a.doctorId === currentUser.id);
+          container.innerHTML = `<div class="bg-white rounded-2xl p-6"><h2 class="text-2xl font-bold">Mis citas</h2>${myApps.map(apt => `<div class="border p-3 mt-2 flex justify-between"><div>${apt.patientName} - ${apt.specialty}<br>${apt.clinic} - ${apt.date} ${apt.time}<br><span class="text-xs">Costo: ${formatCurrency(getConsultationPrice(apt.specialty))}</span></div>${apt.status === "programada" ? `<button onclick="completeAppointment(${apt.id})" class="bg-indigo-600 text-white px-3 py-1 rounded">Completar</button>` : "<span class='text-green-600'>Completada</span>"}</div>`).join('')}</div>`;
+        } else if (activeDocSection === "calendar") {
+          const allApps = appointments.filter(a => a.status === "programada" || a.status === "completada");
+          const grouped = {};
+          allApps.forEach(apt => { if (!grouped[apt.date]) grouped[apt.date] = []; grouped[apt.date].push(apt); });
+          container.innerHTML = `<div class="bg-white rounded-2xl p-6"><h2 class="text-2xl font-bold">Calendario general de todas las citas</h2>${Object.keys(grouped).sort().map(date => `<div class="mt-3"><h3 class="font-bold bg-gray-100 p-2 rounded">📅 ${date}</h3>${grouped[date].map(apt => `<div class="border-l-4 border-blue-400 pl-3 py-2 mt-1 bg-gray-50 rounded">${apt.time} - ${apt.doctorName} (${apt.specialty}) - Paciente: ${apt.patientName} - ${apt.clinic} - Estado: ${apt.status}</div>`).join('')}</div>`).join('')}</div>`;
+        } else if (activeDocSection === "earnings") {
+          const payments = doctorTransactions.filter(t => t.providerId === currentUser.id);
+          const total = payments.reduce((a,b)=>a+b.amount,0);
+          container.innerHTML = `<div class="bg-white rounded-2xl p-6"><h2 class="text-2xl font-bold">Ingresos totales: ${formatCurrency(total)}</h2><ul class="divide-y">${payments.map(p => `<li class="py-2">${p.concept} - +${formatCurrency(p.amount)} (${new Date(p.date).toLocaleDateString()})</li>`).join('')}</ul></div>`;
+        } else {
+          container.innerHTML = `<div class="bg-white rounded-2xl p-6"><h2 class="text-2xl font-bold">Perfil</h2><p>${currentUser.name}</p><p>Especialidad: ${currentUser.specialization}</p><p>Usuario: ${currentUser.username}</p><input type="password" id="newPassDoc" placeholder="Nueva contraseña" class="border p-2 w-full mt-2"><button onclick="updateDocPassword()" class="mt-2 bg-blue-600 text-white px-3 py-1 rounded">Actualizar contraseña</button></div>`;
+        }
+      }
+      
+      window.setDocSection = (section) => {
+        activeDocSection = section;
+        renderDoctorContent();
+      };
+      window.updateDocPassword = () => {
+        const newPass = document.getElementById("newPassDoc")?.value;
+        if (newPass && newPass.trim()) {
+          currentUser.password = newPass;
+          const doctorInList = doctors.find(d => d.id === currentUser.id);
+          if (doctorInList) doctorInList.password = newPass;
+          showToast("Contraseña actualizada", "success");
+        } else showToast("Ingrese una contraseña", "error");
+      };
+      renderDoctorContent();
+    }
+
+    // ==================== CONTROL DE PESTAÑAS LOGIN ====================
+    document.getElementById("btnLoginTab").onclick = () => {
+      document.getElementById("loginForm").classList.remove("hidden");
+      document.getElementById("registerForm").classList.add("hidden");
+      document.getElementById("btnLoginTab").classList.add("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnLoginTab").classList.remove("text-gray-500");
+      document.getElementById("btnRegisterTab").classList.remove("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnRegisterTab").classList.add("text-gray-500");
+    };
+    document.getElementById("btnRegisterTab").onclick = () => {
+      document.getElementById("loginForm").classList.add("hidden");
+      document.getElementById("registerForm").classList.remove("hidden");
+      document.getElementById("btnRegisterTab").classList.add("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnRegisterTab").classList.remove("text-gray-500");
+      document.getElementById("btnLoginTab").classList.remove("border-b-2", "border-blue-600", "text-blue-600");
+      document.getElementById("btnLoginTab").classList.add("text-gray-500");
+    };
+  </script>
+</body>
+</html>
